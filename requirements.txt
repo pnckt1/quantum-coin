@@ -1,0 +1,4 @@
+fastapi
+uvicorn
+qiskit
+qiskit-ibm-runtime

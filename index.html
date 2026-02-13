@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#000000">
+<title>Quantum Coin</title>
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@600&display=swap" rel="stylesheet">
+<style>
+body {
+  margin:0;
+  height:100vh;
+  display:flex;
+  justify-content:center;
+  align-items:center;
+  background: radial-gradient(circle at 30% 30%, #1c1c1e, #000000 70%);
+  color: white;
+  font-family: "Rajdhani", sans-serif;
+
+}
+
+button {
+  padding: 16px 45px;
+  font-size: 17px;
+  border-radius: 4px;
+  border: 2px solid #9c27ff;
+  background: #7b00ff;
+  color: #000000;        /* BLACK text */
+  font-weight: bold;
+  letter-spacing: 1px;
+  box-shadow: 0 0 12px rgba(156, 39, 255, 0.6);
+  transition: transform 0.1s ease, box-shadow 0.2s ease;
+}
+
+button:active {
+  transform: scale(0.96);
+  box-shadow: 0 0 4px rgba(156, 39, 255, 0.9);
+}
+
+#result {
+  font-size: 80px;   /* smaller */
+  font-weight: bold;
+  margin-top: 30px;
+  color: #00f5ff;
+  text-shadow:
+    0 0 8px #00f5ff,
+    0 0 18px rgba(0,245,255,0.6);
+  transition: transform 0.4s ease, opacity 0.4s ease;
+}
+
+.superposition {
+  opacity:0.6;
+  animation: spin 0.6s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotateY(0deg); }
+  to   { transform: rotateY(360deg); }
+}
+</style>
+</head>
+<body>
+
+<div style="text-align:center;">
+  <button onclick="flip()">panna nebo kočka</button>
+  <div id="result">?</div>
+  <div id="backend" style="font-size:12px;opacity:0.6;"></div>
+
+</div>
+
+<script>
+async function flip() {
+  const r = document.getElementById("result");
+  r.textContent = "?";
+  r.classList.add("superposition");
+
+  const res = await fetch("/flip");
+  const data = await res.json();
+
+  setTimeout(() => {
+    r.textContent = data.result === 0 ? "panna" : "kočka";
+    r.classList.remove("superposition");
+
+document.getElementById("backend").textContent =
+  "Measured on " + data.backend;
+
+
+    if (navigator.vibrate) {
+      navigator.vibrate(30);
+    }
+
+    console.log("Backend:", data.backend);
+  }, 600);
+}
+</script>
+
+</body>
+</html>
