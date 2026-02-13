@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
+<link rel="manifest" href="manifest.json">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#000000">
 <title>Quantum Coin</title>
@@ -73,7 +74,7 @@ async function flip() {
   r.textContent = "?";
   r.classList.add("superposition");
 
-  const res = await fetch("/flip");
+  const res = await fetch("https://quantum-coin-1k7w.onrender.com/flip");
   const data = await res.json();
 
   setTimeout(() => {
@@ -90,6 +91,11 @@ document.getElementById("backend").textContent =
 
     console.log("Backend:", data.backend);
   }, 600);
+}
+</script>
+<script>
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('sw.js');
 }
 </script>
 

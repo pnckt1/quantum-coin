@@ -1,3 +1,6 @@
+from fastapi.middleware.cors import CORSMiddleware
+
+
 from fastapi.responses import FileResponse
 
 
@@ -7,6 +10,13 @@ from qiskit import QuantumCircuit, transpile
 from qiskit_ibm_runtime import QiskitRuntimeService, Sampler
 
 app = FastAPI()
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # we can restrict later
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 IBM_TOKEN = os.environ.get("IBM_TOKEN")
 
