@@ -23,14 +23,14 @@ service = QiskitRuntimeService(
     instance="crn:v1:bluemix:public:quantum-computing:us-east:a/ace2d7c4d936422892a7fd06ce1d3af4:c9832be1-5bc4-4c7a-a990-a024165d17ba::"
 )
 
-# Automatically choose least busy operational backend
+# vyber nejméně vytížený backend
 backends = service.backends(simulator=False, operational=True)
 backend = min(backends, key=lambda b: b.status().pending_jobs)
 
 sampler = Sampler(mode=backend)
 
 # =========================
-# TAROT DECK (78 CARDS)
+# TAROT DECK
 # =========================
 
 MAJOR_ARCANA = [
@@ -51,26 +51,36 @@ MINOR_ARCANA = [f"{rank} of {suit}" for suit in SUITS for rank in RANKS]
 TAROT_DECK = MAJOR_ARCANA + MINOR_ARCANA
 
 # =========================
-# QUANTUM RANDOM INDEX
+# QUANTUM MULTI INDEX
 # =========================
 
-def quantum_index(max_value: int):
+def quantum_indices(count: int, max_value: int):
+    """
+    Vygeneruje více náhodných indexů v jednom kvantovém běhu.
+    """
 
-    qc = QuantumCircuit(1)
-    qc.h(0)
+    qc = QuantumCircuit(8)
+    for i in range(8):
+        qc.h(i)
     qc.measure_all()
 
     transpiled_qc = transpile(qc, backend)
 
-    job = sampler.run([transpiled_qc], shots=8)
+    job = sampler.run([transpiled_qc], shots=1)
     result = job.result()
 
     counts = result[0].data.meas.get_counts()
-
     bitstring = list(counts.keys())[0]
+
     number = int(bitstring, 2)
 
-    return number % max_value
+    indices = []
+    for i in range(count):
+        # vezmeme různé části čísla
+        value = (number >> (i * 2)) % max_value
+        indices.append(value)
+
+    return indices
 
 # =========================
 # STATUS
@@ -93,8 +103,10 @@ async def draw_cards(question: str):
     selected = []
     available = TAROT_DECK.copy()
 
-    for _ in range(3):
-        idx = quantum_index(len(available))
+    indices = quantum_indices(3, len(available))
+
+    for idx in indices:
+        idx = idx % len(available)
         card = available.pop(idx)
         selected.append(card)
 
@@ -142,7 +154,6 @@ Provide a cohesive interpretation.
     )
 
     result = response.json()
-
     interpretation = result["choices"][0]["message"]["content"]
 
     return {
