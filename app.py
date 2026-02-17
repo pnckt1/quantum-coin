@@ -1,21 +1,10 @@
 import os
-import random
 import requests
 from fastapi import FastAPI
-from fastapi.staticfiles import StaticFiles
 from qiskit import QuantumCircuit, transpile
 from qiskit_ibm_runtime import QiskitRuntimeService, Sampler
 
 app = FastAPI()
-from fastapi.middleware.cors import CORSMiddleware
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 # =========================
 # ENV VARIABLES
@@ -23,12 +12,6 @@ app.add_middleware(
 
 IBM_TOKEN = os.environ.get("IBM_TOKEN")
 OPENROUTER_KEY = os.environ.get("OPENROUTER_API_KEY")
-
-# =========================
-# SERVE CARD IMAGES
-# =========================
-
-app.mount("/cards", StaticFiles(directory="cards"), name="cards")
 
 # =========================
 # IBM QUANTUM SETUP
@@ -40,13 +23,14 @@ service = QiskitRuntimeService(
     instance="crn:v1:bluemix:public:quantum-computing:us-east:a/ace2d7c4d936422892a7fd06ce1d3af4:c9832be1-5bc4-4c7a-a990-a024165d17ba::"
 )
 
+# choose least busy hardware backend
 backends = service.backends(simulator=False, operational=True)
 backend = min(backends, key=lambda b: b.status().pending_jobs)
 
 sampler = Sampler(mode=backend)
 
 # =========================
-# TAROT DATA
+# TAROT DECK
 # =========================
 
 MAJOR_ARCANA = [
@@ -62,15 +46,12 @@ SUITS = ["Wands", "Cups", "Swords", "Pentacles"]
 RANKS = ["Ace", "2", "3", "4", "5", "6", "7", "8", "9", "10",
          "Page", "Knight", "Queen", "King"]
 
-SUIT_PREFIX = {
-    "Wands": "w",
-    "Cups": "c",
-    "Swords": "s",
-    "Pentacles": "p"
-}
+MINOR_ARCANA = [f"{rank} of {suit}" for suit in SUITS for rank in RANKS]
+
+TAROT_DECK = MAJOR_ARCANA + MINOR_ARCANA
 
 # =========================
-# QUANTUM RANDOM INDEX
+# QUANTUM RANDOM
 # =========================
 
 def quantum_index(max_value: int):
@@ -103,33 +84,24 @@ async def status():
     }
 
 # =========================
-# DRAW 3 CARDS
+# DRAW CARDS
 # =========================
 
 @app.get("/draw")
 async def draw_cards(question: str):
 
     selected = []
-    available_major = list(range(22))
-    available_minor = list(range(1, 15))
+    available = TAROT_DECK.copy()
 
     for _ in range(3):
+        idx = quantum_index(len(available))
+        card = available.pop(idx)
 
-        if random.random() < 0.3:
-            idx = quantum_index(len(available_major))
-            card_number = available_major.pop(idx)
-            filename = f"m{card_number:02}.jpg"
-            card_name = MAJOR_ARCANA[card_number]
-        else:
-            suit = random.choice(SUITS)
-            idx = quantum_index(len(available_minor))
-            number = available_minor.pop(idx)
-            filename = f"{SUIT_PREFIX[suit]}{number:02}.jpg"
-            rank = RANKS[number - 1]
-            card_name = f"{rank} of {suit}"
+        # generate filename mapping
+        filename = card_filename(card)
 
         selected.append({
-            "name": card_name,
+            "name": card,
             "image": filename
         })
 
@@ -140,7 +112,63 @@ async def draw_cards(question: str):
     }
 
 # =========================
-# INTERPRET SPREAD
+# FILENAME MAPPING
+# =========================
+
+def card_filename(card_name):
+
+    # Major arcana mapping example
+    major_map = {
+        "The Fool": "m00.jpg",
+        "The Magician": "m01.jpg",
+        "The High Priestess": "m02.jpg",
+        "The Empress": "m03.jpg",
+        "The Emperor": "m04.jpg",
+        "The Hierophant": "m05.jpg",
+        "The Lovers": "m06.jpg",
+        "The Chariot": "m07.jpg",
+        "Strength": "m08.jpg",
+        "The Hermit": "m09.jpg",
+        "Wheel of Fortune": "m10.jpg",
+        "Justice": "m11.jpg",
+        "The Hanged Man": "m12.jpg",
+        "Death": "m13.jpg",
+        "Temperance": "m14.jpg",
+        "The Devil": "m15.jpg",
+        "The Tower": "m16.jpg",
+        "The Star": "m17.jpg",
+        "The Moon": "m18.jpg",
+        "The Sun": "m19.jpg",
+        "Judgement": "m20.jpg",
+        "The World": "m21.jpg"
+    }
+
+    if card_name in major_map:
+        return major_map[card_name]
+
+    # Minor arcana
+    rank, _, suit = card_name.partition(" of ")
+
+    suit_letter = {
+        "Wands": "w",
+        "Cups": "c",
+        "Swords": "s",
+        "Pentacles": "p"
+    }[suit]
+
+    rank_map = {
+        "Ace": "01",
+        "2": "02", "3": "03", "4": "04", "5": "05",
+        "6": "06", "7": "07", "8": "08", "9": "09",
+        "10": "10",
+        "Page": "11", "Knight": "12",
+        "Queen": "13", "King": "14"
+    }
+
+    return f"{suit_letter}{rank_map[rank]}.jpg"
+
+# =========================
+# INTERPRET
 # =========================
 
 @app.post("/interpret")
@@ -149,7 +177,8 @@ async def interpret(data: dict):
     question = data.get("question")
     cards = data.get("cards")
 
-    card_names = [card["name"] for card in cards]
+    if not OPENROUTER_KEY:
+        return {"interpretation": "OPENROUTER_API_KEY not set on server."}
 
     prompt = f"""
 Interpret this tarot spread in a psychologically grounded but symbolic way.
@@ -158,33 +187,36 @@ Question:
 {question}
 
 Cards:
-{", ".join(card_names)}
-
-Provide a cohesive interpretation.
+{", ".join(cards)}
 """
 
-    response = requests.post(
-        "https://openrouter.ai/api/v1/chat/completions",
-        headers={
-            "Authorization": f"Bearer {OPENROUTER_KEY}",
-            "HTTP-Referer": "https://quantum-coin-1k7w.onrender.com",
-            "X-Title": "Quantum Tarot"
-        },
-        json={
-            "model": "openai/gpt-4o-mini",
-            "messages": [
-                {"role": "user", "content": prompt}
-            ]
+    try:
+        response = requests.post(
+            "https://openrouter.ai/api/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {OPENROUTER_KEY}",
+                "Content-Type": "application/json"
+            },
+            json={
+                "model": "openai/gpt-4o-mini",
+                "messages": [
+                    {"role": "user", "content": prompt}
+                ]
+            },
+            timeout=90
+        )
+
+        result = response.json()
+
+        if "choices" not in result:
+            return {"interpretation": f"OpenRouter error: {result}"}
+
+        return {
+            "interpretation": result["choices"][0]["message"]["content"]
         }
-    )
 
-    result = response.json()
-
-    interpretation = result["choices"][0]["message"]["content"]
-
-    return {
-        "interpretation": interpretation
-    }
+    except Exception as e:
+        return {"interpretation": f"Server exception: {str(e)}"}
 
 # =========================
 # ROOT
