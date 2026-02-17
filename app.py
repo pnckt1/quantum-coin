@@ -23,7 +23,10 @@ service = QiskitRuntimeService(
     instance="crn:v1:bluemix:public:quantum-computing:us-east:a/ace2d7c4d936422892a7fd06ce1d3af4:c9832be1-5bc4-4c7a-a990-a024165d17ba::"
 )
 
-backend = service.backend("ibm_torino")
+# Automatically choose least busy operational backend
+backends = service.backends(simulator=False, operational=True)
+backend = min(backends, key=lambda b: b.status().pending_jobs)
+
 sampler = Sampler(mode=backend)
 
 # =========================
