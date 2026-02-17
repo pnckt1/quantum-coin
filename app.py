@@ -1,45 +1,57 @@
-from fastapi.middleware.cors import CORSMiddleware
-
-
-from fastapi.responses import FileResponse
-
-
 import os
+import requests
 from fastapi import FastAPI
 from qiskit import QuantumCircuit, transpile
 from qiskit_ibm_runtime import QiskitRuntimeService, Sampler
 
 app = FastAPI()
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # we can restrict later
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+
+# =========================
+# ENV VARIABLES
+# =========================
 
 IBM_TOKEN = os.environ.get("IBM_TOKEN")
+OPENROUTER_KEY = os.environ.get("OPENROUTER_API_KEY")
 
-# 1️⃣ First create the service
+# =========================
+# IBM QUANTUM SETUP
+# =========================
+
 service = QiskitRuntimeService(
     channel="ibm_quantum_platform",
     token=IBM_TOKEN,
     instance="crn:v1:bluemix:public:quantum-computing:us-east:a/ace2d7c4d936422892a7fd06ce1d3af4:c9832be1-5bc4-4c7a-a990-a024165d17ba::"
 )
 
-# 2️⃣ THEN create backend
-
-# Get all operational real backends
-real_backends = service.backends(simulator=False, operational=True)
-
-# Choose backend with smallest queue
-backend = min(real_backends, key=lambda b: b.status().pending_jobs)
-
+backend = service.backend("ibm_torino")
 sampler = Sampler(mode=backend)
 
+# =========================
+# TAROT DECK (78 CARDS)
+# =========================
 
-@app.get("/flip")
-async def flip():
+MAJOR_ARCANA = [
+    "The Fool", "The Magician", "The High Priestess", "The Empress",
+    "The Emperor", "The Hierophant", "The Lovers", "The Chariot",
+    "Strength", "The Hermit", "Wheel of Fortune", "Justice",
+    "The Hanged Man", "Death", "Temperance", "The Devil",
+    "The Tower", "The Star", "The Moon", "The Sun",
+    "Judgement", "The World"
+]
+
+SUITS = ["Wands", "Cups", "Swords", "Pentacles"]
+RANKS = ["Ace", "2", "3", "4", "5", "6", "7", "8", "9", "10",
+         "Page", "Knight", "Queen", "King"]
+
+MINOR_ARCANA = [f"{rank} of {suit}" for suit in SUITS for rank in RANKS]
+
+TAROT_DECK = MAJOR_ARCANA + MINOR_ARCANA
+
+# =========================
+# QUANTUM RANDOM INDEX
+# =========================
+
+def quantum_index(max_value: int):
 
     qc = QuantumCircuit(1)
     qc.h(0)
@@ -47,18 +59,19 @@ async def flip():
 
     transpiled_qc = transpile(qc, backend)
 
-    job = sampler.run([transpiled_qc], shots=1)
+    job = sampler.run([transpiled_qc], shots=8)
     result = job.result()
 
     counts = result[0].data.meas.get_counts()
-    bit = list(counts.keys())[0]
 
-    return {
-    "result": int(bit),
-    "backend": backend.name,
-    "mode": "hardware"
-}
+    bitstring = list(counts.keys())[0]
+    number = int(bitstring, 2)
 
+    return number % max_value
+
+# =========================
+# STATUS
+# =========================
 
 @app.get("/status")
 async def status():
@@ -67,6 +80,77 @@ async def status():
         "pending_jobs": backend.status().pending_jobs
     }
 
+# =========================
+# DRAW 3 CARDS
+# =========================
+
+@app.get("/draw")
+async def draw_cards(question: str):
+
+    selected = []
+    available = TAROT_DECK.copy()
+
+    for _ in range(3):
+        idx = quantum_index(len(available))
+        card = available.pop(idx)
+        selected.append(card)
+
+    return {
+        "question": question,
+        "cards": selected,
+        "backend": backend.name
+    }
+
+# =========================
+# INTERPRET SPREAD
+# =========================
+
+@app.post("/interpret")
+async def interpret(data: dict):
+
+    question = data.get("question")
+    cards = data.get("cards")
+
+    prompt = f"""
+Interpret this tarot spread in a psychologically grounded but symbolic way.
+
+Question:
+{question}
+
+Cards:
+{", ".join(cards)}
+
+Provide a cohesive interpretation.
+"""
+
+    response = requests.post(
+        "https://openrouter.ai/api/v1/chat/completions",
+        headers={
+            "Authorization": f"Bearer {OPENROUTER_KEY}",
+            "HTTP-Referer": "https://quantum-coin-1k7w.onrender.com",
+            "X-Title": "Quantum Tarot"
+        },
+        json={
+            "model": "openai/gpt-4o-mini",
+            "messages": [
+                {"role": "user", "content": prompt}
+            ]
+        }
+    )
+
+    result = response.json()
+
+    interpretation = result["choices"][0]["message"]["content"]
+
+    return {
+        "cards": cards,
+        "interpretation": interpretation
+    }
+
+# =========================
+# ROOT
+# =========================
+
 @app.get("/")
 async def root():
-    return FileResponse("index.html")
+    return {"message": "Quantum Tarot Backend Running"}
