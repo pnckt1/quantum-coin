@@ -94,10 +94,10 @@ async def create_draw(data: dict):
     job_id = str(uuid4())
 
     jobs[job_id] = {
-        "ibm_job": ibm_job,
-        "backend": backend.name,
-        "question": question
-    }
+    "ibm_job_id": ibm_job.job_id(),
+    "backend": backend.name,
+    "question": question
+}
 
     return {"job_id": job_id}
 
@@ -106,13 +106,20 @@ async def create_draw(data: dict):
 # =========================
 
 @app.get("/result/{job_id}")
+
 async def get_result(job_id: str):
 
     if job_id not in jobs:
         return {"error": "Invalid job_id"}
 
     job_data = jobs[job_id]
-    ibm_job = job_data["ibm_job"]
+    service = QiskitRuntimeService(
+    channel="ibm_quantum_platform",
+    token=IBM_TOKEN,
+    instance=INSTANCE
+)
+
+ibm_job = service.job(job_data["ibm_job_id"])
 
     status = ibm_job.status()
 
