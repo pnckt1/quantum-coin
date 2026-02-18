@@ -7,14 +7,14 @@ from qiskit_ibm_runtime import QiskitRuntimeService, Sampler
 app = FastAPI()
 
 # =========================
-# ENV VARIABLES
+# ENV
 # =========================
 
 IBM_TOKEN = os.environ.get("IBM_TOKEN")
 OPENROUTER_KEY = os.environ.get("OPENROUTER_API_KEY")
 
 # =========================
-# IBM QUANTUM SETUP
+# IBM SETUP
 # =========================
 
 service = QiskitRuntimeService(
@@ -23,7 +23,6 @@ service = QiskitRuntimeService(
     instance="crn:v1:bluemix:public:quantum-computing:us-east:a/ace2d7c4d936422892a7fd06ce1d3af4:c9832be1-5bc4-4c7a-a990-a024165d17ba::"
 )
 
-# choose least busy hardware backend
 backends = service.backends(simulator=False, operational=True)
 backend = min(backends, key=lambda b: b.status().pending_jobs)
 
@@ -51,73 +50,11 @@ MINOR_ARCANA = [f"{rank} of {suit}" for suit in SUITS for rank in RANKS]
 TAROT_DECK = MAJOR_ARCANA + MINOR_ARCANA
 
 # =========================
-# QUANTUM RANDOM
-# =========================
-
-def quantum_index(max_value: int):
-
-    qc = QuantumCircuit(1)
-    qc.h(0)
-    qc.measure_all()
-
-    transpiled_qc = transpile(qc, backend)
-
-    job = sampler.run([transpiled_qc], shots=8)
-    result = job.result()
-
-    counts = result[0].data.meas.get_counts()
-
-    bitstring = list(counts.keys())[0]
-    number = int(bitstring, 2)
-
-    return number % max_value
-
-# =========================
-# STATUS
-# =========================
-
-@app.get("/status")
-async def status():
-    return {
-        "backend": backend.name,
-        "pending_jobs": backend.status().pending_jobs
-    }
-
-# =========================
-# DRAW CARDS
-# =========================
-
-@app.get("/draw")
-async def draw_cards(question: str):
-
-    selected = []
-    available = TAROT_DECK.copy()
-
-    for _ in range(3):
-        idx = quantum_index(len(available))
-        card = available.pop(idx)
-
-        # generate filename mapping
-        filename = card_filename(card)
-
-        selected.append({
-            "name": card,
-            "image": filename
-        })
-
-    return {
-        "question": question,
-        "cards": selected,
-        "backend": backend.name
-    }
-
-# =========================
-# FILENAME MAPPING
+# CARD IMAGE MAPPING
 # =========================
 
 def card_filename(card_name):
 
-    # Major arcana mapping example
     major_map = {
         "The Fool": "m00.jpg",
         "The Magician": "m01.jpg",
@@ -146,7 +83,6 @@ def card_filename(card_name):
     if card_name in major_map:
         return major_map[card_name]
 
-    # Minor arcana
     rank, _, suit = card_name.partition(" of ")
 
     suit_letter = {
@@ -166,6 +102,70 @@ def card_filename(card_name):
     }
 
     return f"{suit_letter}{rank_map[rank]}.jpg"
+
+# =========================
+# QUANTUM DRAW (ONE JOB)
+# =========================
+
+def quantum_draw_three(deck):
+
+    qc = QuantumCircuit(20)
+    qc.h(range(20))
+    qc.measure_all()
+
+    transpiled_qc = transpile(qc, backend)
+
+    job = sampler.run([transpiled_qc], shots=1)
+    result = job.result()
+
+    counts = result[0].data.meas.get_counts()
+    bitstring = list(counts.keys())[0]
+
+    seed = int(bitstring, 2)
+
+    shuffled = deck.copy()
+
+    # Deterministic Fisher-Yates shuffle
+    for i in range(len(shuffled) - 1, 0, -1):
+        seed = (seed * 1664525 + 1013904223) & 0xffffffff
+        j = seed % (i + 1)
+        shuffled[i], shuffled[j] = shuffled[j], shuffled[i]
+
+    return shuffled[:3]
+
+# =========================
+# STATUS
+# =========================
+
+@app.get("/status")
+async def status():
+    return {
+        "backend": backend.name,
+        "pending_jobs": backend.status().pending_jobs
+    }
+
+# =========================
+# DRAW ENDPOINT
+# =========================
+
+@app.get("/draw")
+async def draw_cards(question: str):
+
+    selected_cards = quantum_draw_three(TAROT_DECK)
+
+    result_cards = [
+        {
+            "name": card,
+            "image": card_filename(card)
+        }
+        for card in selected_cards
+    ]
+
+    return {
+        "question": question,
+        "cards": result_cards,
+        "backend": backend.name
+    }
 
 # =========================
 # INTERPRET
