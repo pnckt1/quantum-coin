@@ -1,62 +1,42 @@
 import os
 import requests
-from uuid import uuid4
 from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
 from qiskit import QuantumCircuit, transpile
 from qiskit_ibm_runtime import QiskitRuntimeService, Sampler
 
 app = FastAPI()
-
-# -------------------------
-# CORS (nutné pro frontend)
-# -------------------------
+from fastapi.middleware.cors import CORSMiddleware
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["https://panna-nebo-kocka.netlify.app"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# -------------------------
-# ENV
-# -------------------------
+# =========================
+# ENV VARIABLES
+# =========================
 
 IBM_TOKEN = os.environ.get("IBM_TOKEN")
 OPENROUTER_KEY = os.environ.get("OPENROUTER_API_KEY")
 
-INSTANCE = "crn:v1:bluemix:public:quantum-computing:us-east:a/ace2d7c4d936422892a7fd06ce1d3af4:c9832be1-5bc4-4c7a-a990-a024165d17ba::"
+# =========================
+# IBM QUANTUM SETUP
+# =========================
 
-# -------------------------
-# IN-MEMORY JOB STORAGE
-# -------------------------
+service = QiskitRuntimeService(
+    channel="ibm_quantum_platform",
+    token=IBM_TOKEN,
+    instance="crn:v1:bluemix:public:quantum-computing:us-east:a/ace2d7c4d936422892a7fd06ce1d3af4:c9832be1-5bc4-4c7a-a990-a024165d17ba::"
+)
 
-jobs = {}
+backend = service.backend("ibm_torino")
+sampler = Sampler(mode=backend)
 
-# -------------------------
-# IBM SAMPLER FACTORY
-# -------------------------
-
-def get_sampler():
-
-    service = QiskitRuntimeService(
-        channel="ibm_quantum_platform",
-        token=IBM_TOKEN,
-        instance=INSTANCE
-    )
-
-    backends = service.backends(simulator=False, operational=True)
-    backend = min(backends, key=lambda b: b.status().pending_jobs)
-
-    sampler = Sampler(mode=backend)
-
-    return sampler, backend
-
-# -------------------------
-# TAROT DECK
-# -------------------------
+# =========================
+# TAROT DECK (78 CARDS)
+# =========================
 
 MAJOR_ARCANA = [
     "The Fool", "The Magician", "The High Priestess", "The Empress",
@@ -72,150 +52,87 @@ RANKS = ["Ace", "2", "3", "4", "5", "6", "7", "8", "9", "10",
          "Page", "Knight", "Queen", "King"]
 
 MINOR_ARCANA = [f"{rank} of {suit}" for suit in SUITS for rank in RANKS]
+
 TAROT_DECK = MAJOR_ARCANA + MINOR_ARCANA
 
-# -------------------------
-# CARD IMAGE MAPPING
-# -------------------------
+# =========================
+# QUANTUM RANDOM INDEX
+# =========================
 
-def card_filename(card_name):
+def quantum_index(max_value: int):
 
-    major_map = {
-        "The Fool": "m00.jpg",
-        "The Magician": "m01.jpg",
-        "The High Priestess": "m02.jpg",
-        "The Empress": "m03.jpg",
-        "The Emperor": "m04.jpg",
-        "The Hierophant": "m05.jpg",
-        "The Lovers": "m06.jpg",
-        "The Chariot": "m07.jpg",
-        "Strength": "m08.jpg",
-        "The Hermit": "m09.jpg",
-        "Wheel of Fortune": "m10.jpg",
-        "Justice": "m11.jpg",
-        "The Hanged Man": "m12.jpg",
-        "Death": "m13.jpg",
-        "Temperance": "m14.jpg",
-        "The Devil": "m15.jpg",
-        "The Tower": "m16.jpg",
-        "The Star": "m17.jpg",
-        "The Moon": "m18.jpg",
-        "The Sun": "m19.jpg",
-        "Judgement": "m20.jpg",
-        "The World": "m21.jpg"
-    }
-
-    if card_name in major_map:
-        return major_map[card_name]
-
-    rank, _, suit = card_name.partition(" of ")
-
-    suit_letter = {
-        "Wands": "w",
-        "Cups": "c",
-        "Swords": "s",
-        "Pentacles": "p"
-    }[suit]
-
-    rank_map = {
-        "Ace": "01",
-        "2": "02", "3": "03", "4": "04", "5": "05",
-        "6": "06", "7": "07", "8": "08", "9": "09",
-        "10": "10",
-        "Page": "11", "Knight": "12",
-        "Queen": "13", "King": "14"
-    }
-
-    return f"{suit_letter}{rank_map[rank]}.jpg"
-
-# -------------------------
-# CREATE IBM DRAW JOB
-# -------------------------
-
-@app.post("/draw")
-async def create_draw_job(data: dict):
-
-    question = data.get("question")
-
-    sampler, backend = get_sampler()
-
-    qc = QuantumCircuit(8)
-    qc.h(range(8))
+    qc = QuantumCircuit(1)
+    qc.h(0)
     qc.measure_all()
 
     transpiled_qc = transpile(qc, backend)
 
-    ibm_job = sampler.run([transpiled_qc], shots=1)
+    job = sampler.run([transpiled_qc], shots=8)
+    result = job.result()
 
-    job_id = str(uuid4())
+    counts = result[0].data.meas.get_counts()
 
-    jobs[job_id] = {
-        "ibm_job": ibm_job,
-        "backend": backend.name,
-        "question": question,
-        "status": "running"
-    }
+    bitstring = list(counts.keys())[0]
+    number = int(bitstring, 2)
 
-    return {"job_id": job_id}
+    return number % max_value
 
-# -------------------------
-# CHECK JOB RESULT
-# -------------------------
+# =========================
+# STATUS
+# =========================
 
-@app.get("/result/{job_id}")
-async def get_result(job_id: str):
+@app.get("/status")
+async def status():
 
-    if job_id not in jobs:
-        return {"error": "Invalid job_id"}
+    try:
+        service = QiskitRuntimeService(
+            channel="ibm_quantum_platform",
+            token=IBM_TOKEN,
+            instance="crn:v1:bluemix:public:quantum-computing:us-east:a/ace2d7c4d936422892a7fd06ce1d3af4:c9832be1-5bc4-4c7a-a990-a024165d17ba::"
+        )
 
-    job_data = jobs[job_id]
-    ibm_job = job_data["ibm_job"]
+        backends = service.backends(simulator=False, operational=True)
+        backend = min(backends, key=lambda b: b.status().pending_jobs)
 
-    status = ibm_job.status()
-
-    if status.name != "DONE":
         return {
-            "status": "running",
-            "ibm_status": status.name,
-            "backend": job_data["backend"]
+            "backend": backend.name,
+            "pending_jobs": backend.status().pending_jobs
         }
 
-    result = ibm_job.result()
-    counts = result[0].data.meas.get_counts()
-    bitstring = list(counts.keys())[0]
+    except Exception as e:
+        return {
+            "error": str(e)
+        }
+# =========================
+# DRAW 3 CARDS
+# =========================
 
-    seed = int(bitstring, 2)
+@app.get("/draw")
+async def draw_cards(question: str):
 
-    shuffled = TAROT_DECK.copy()
-    for i in range(len(shuffled) - 1, 0, -1):
-        seed = (seed * 1664525 + 1013904223) & 0xffffffff
-        j = seed % (i + 1)
-        shuffled[i], shuffled[j] = shuffled[j], shuffled[i]
+    selected = []
+    available = TAROT_DECK.copy()
 
-    cards = shuffled[:3]
-
-    jobs[job_id]["status"] = "done"
+    for _ in range(3):
+        idx = quantum_index(len(available))
+        card = available.pop(idx)
+        selected.append(card)
 
     return {
-        "status": "done",
-        "cards": [
-            {"name": c, "image": card_filename(c)} for c in cards
-        ],
-        "backend": job_data["backend"]
+        "question": question,
+        "cards": selected,
+        "backend": backend.name
     }
 
-# -------------------------
-# INTERPRET
-# -------------------------
+# =========================
+# INTERPRET SPREAD
+# =========================
 
 @app.post("/interpret")
 async def interpret(data: dict):
 
     question = data.get("question")
     cards = data.get("cards")
-
-    if not OPENROUTER_KEY:
-        return {"interpretation": "OPENROUTER_API_KEY not set on server."}
 
     prompt = f"""
 Interpret this tarot spread in a psychologically grounded but symbolic way.
@@ -225,35 +142,37 @@ Question:
 
 Cards:
 {", ".join(cards)}
+
+Provide a cohesive interpretation.
 """
 
-    try:
-        response = requests.post(
-            "https://openrouter.ai/api/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {OPENROUTER_KEY}",
-                "Content-Type": "application/json"
-            },
-            json={
-                "model": "openai/gpt-4o-mini",
-                "messages": [
-                    {"role": "user", "content": prompt}
-                ]
-            },
-            timeout=60
-        )
-
-        result = response.json()
-
-        if "choices" not in result:
-            return {"interpretation": f"OpenRouter error: {result}"}
-
-        return {
-            "interpretation": result["choices"][0]["message"]["content"]
+    response = requests.post(
+        "https://openrouter.ai/api/v1/chat/completions",
+        headers={
+            "Authorization": f"Bearer {OPENROUTER_KEY}",
+            "HTTP-Referer": "https://quantum-coin-1k7w.onrender.com",
+            "X-Title": "Quantum Tarot"
+        },
+        json={
+            "model": "openai/gpt-4o-mini",
+            "messages": [
+                {"role": "user", "content": prompt}
+            ]
         }
+    )
 
-    except Exception as e:
-        return {"interpretation": f"Server exception: {str(e)}"}
+    result = response.json()
+
+    interpretation = result["choices"][0]["message"]["content"]
+
+    return {
+        "cards": cards,
+        "interpretation": interpretation
+    }
+
+# =========================
+# ROOT
+# =========================
 
 @app.get("/")
 async def root():
