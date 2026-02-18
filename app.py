@@ -131,8 +131,19 @@ ibm_job = service.job(job_data["ibm_job_id"])
         }
 
     result = ibm_job.result()
-    counts = result[0].data.meas.get_counts()
-    bitstring = list(counts.keys())[0]
+
+data = result[0].data
+
+if not hasattr(data, "meas"):
+    return {"status": "error", "ibm_status": "INVALID_RESULT"}
+
+counts = data.meas.get_counts()
+
+if not counts:
+    return {"status": "error", "ibm_status": "EMPTY_COUNTS"}
+
+bitstring = list(counts.keys())[0]
+
 
     seed = int(bitstring, 2)
 
