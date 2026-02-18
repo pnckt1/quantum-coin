@@ -1,36 +1,62 @@
 import os
 import requests
+from uuid import uuid4
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from qiskit import QuantumCircuit, transpile
 from qiskit_ibm_runtime import QiskitRuntimeService, Sampler
 
 app = FastAPI()
 
-# =========================
+# -------------------------
+# CORS (nutné pro frontend)
+# -------------------------
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# -------------------------
 # ENV
-# =========================
+# -------------------------
 
 IBM_TOKEN = os.environ.get("IBM_TOKEN")
 OPENROUTER_KEY = os.environ.get("OPENROUTER_API_KEY")
 
-# =========================
-# IBM SETUP
-# =========================
+INSTANCE = "crn:v1:bluemix:public:quantum-computing:us-east:a/ace2d7c4d936422892a7fd06ce1d3af4:c9832be1-5bc4-4c7a-a990-a024165d17ba::"
 
-service = QiskitRuntimeService(
-    channel="ibm_quantum_platform",
-    token=IBM_TOKEN,
-    instance="crn:v1:bluemix:public:quantum-computing:us-east:a/ace2d7c4d936422892a7fd06ce1d3af4:c9832be1-5bc4-4c7a-a990-a024165d17ba::"
-)
+# -------------------------
+# IN-MEMORY JOB STORAGE
+# -------------------------
 
-backends = service.backends(simulator=False, operational=True)
-backend = min(backends, key=lambda b: b.status().pending_jobs)
+jobs = {}
 
-sampler = Sampler(mode=backend)
+# -------------------------
+# IBM SAMPLER FACTORY
+# -------------------------
 
-# =========================
+def get_sampler():
+
+    service = QiskitRuntimeService(
+        channel="ibm_quantum_platform",
+        token=IBM_TOKEN,
+        instance=INSTANCE
+    )
+
+    backends = service.backends(simulator=False, operational=True)
+    backend = min(backends, key=lambda b: b.status().pending_jobs)
+
+    sampler = Sampler(mode=backend)
+
+    return sampler, backend
+
+# -------------------------
 # TAROT DECK
-# =========================
+# -------------------------
 
 MAJOR_ARCANA = [
     "The Fool", "The Magician", "The High Priestess", "The Empress",
@@ -46,12 +72,11 @@ RANKS = ["Ace", "2", "3", "4", "5", "6", "7", "8", "9", "10",
          "Page", "Knight", "Queen", "King"]
 
 MINOR_ARCANA = [f"{rank} of {suit}" for suit in SUITS for rank in RANKS]
-
 TAROT_DECK = MAJOR_ARCANA + MINOR_ARCANA
 
-# =========================
+# -------------------------
 # CARD IMAGE MAPPING
-# =========================
+# -------------------------
 
 def card_filename(card_name):
 
@@ -103,73 +128,85 @@ def card_filename(card_name):
 
     return f"{suit_letter}{rank_map[rank]}.jpg"
 
-# =========================
-# QUANTUM DRAW (ONE JOB)
-# =========================
+# -------------------------
+# CREATE IBM DRAW JOB
+# -------------------------
 
-def quantum_draw_three(deck):
+@app.post("/draw")
+async def create_draw_job(data: dict):
 
-    qc = QuantumCircuit(20)
-    qc.h(range(20))
+    question = data.get("question")
+
+    sampler, backend = get_sampler()
+
+    qc = QuantumCircuit(8)
+    qc.h(range(8))
     qc.measure_all()
 
     transpiled_qc = transpile(qc, backend)
 
-    job = sampler.run([transpiled_qc], shots=1)
-    result = job.result()
+    ibm_job = sampler.run([transpiled_qc], shots=1)
 
+    job_id = str(uuid4())
+
+    jobs[job_id] = {
+        "ibm_job": ibm_job,
+        "backend": backend.name,
+        "question": question,
+        "status": "running"
+    }
+
+    return {"job_id": job_id}
+
+# -------------------------
+# CHECK JOB RESULT
+# -------------------------
+
+@app.get("/result/{job_id}")
+async def get_result(job_id: str):
+
+    if job_id not in jobs:
+        return {"error": "Invalid job_id"}
+
+    job_data = jobs[job_id]
+    ibm_job = job_data["ibm_job"]
+
+    status = ibm_job.status()
+
+    if status.name != "DONE":
+        return {
+            "status": "running",
+            "ibm_status": status.name,
+            "backend": job_data["backend"]
+        }
+
+    result = ibm_job.result()
     counts = result[0].data.meas.get_counts()
     bitstring = list(counts.keys())[0]
 
     seed = int(bitstring, 2)
 
-    shuffled = deck.copy()
-
-    # Deterministic Fisher-Yates shuffle
+    shuffled = TAROT_DECK.copy()
     for i in range(len(shuffled) - 1, 0, -1):
         seed = (seed * 1664525 + 1013904223) & 0xffffffff
         j = seed % (i + 1)
         shuffled[i], shuffled[j] = shuffled[j], shuffled[i]
 
-    return shuffled[:3]
+    cards = shuffled[:3]
 
-# =========================
-# STATUS
-# =========================
-
-@app.get("/status")
-async def status():
-    return {
-        "backend": backend.name,
-        "pending_jobs": backend.status().pending_jobs
-    }
-
-# =========================
-# DRAW ENDPOINT
-# =========================
-
-@app.get("/draw")
-async def draw_cards(question: str):
-
-    selected_cards = quantum_draw_three(TAROT_DECK)
-
-    result_cards = [
-        {
-            "name": card,
-            "image": card_filename(card)
-        }
-        for card in selected_cards
-    ]
+    jobs[job_id]["status"] = "done"
 
     return {
-        "question": question,
-        "cards": result_cards,
-        "backend": backend.name
+        "status": "done",
+        "cards": [
+            {"name": c, "image": card_filename(c)} for c in cards
+        ],
+        "backend": job_data["backend"]
     }
 
-# =========================
+# -------------------------
 # INTERPRET
-# =========================
+# -------------------------
 
 @app.post("/interpret")
 async def interpret(data: dict):
@@ -203,7 +240,7 @@ Cards:
                     {"role": "user", "content": prompt}
                 ]
             },
-            timeout=90
+            timeout=60
         )
 
         result = response.json()
@@ -217,10 +254,6 @@ Cards:
 
     except Exception as e:
         return {"interpretation": f"Server exception: {str(e)}"}
-
-# =========================
-# ROOT
-# =========================
 
 @app.get("/")
 async def root():
