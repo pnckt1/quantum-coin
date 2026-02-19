@@ -173,4 +173,4 @@ async def get_result(job_id: str):
     shuffled = TAROT_DECK.copy()
 
     for i in range(len(shuffled) - 1, 0, -1):
-        seed = (seed * 1664525 + 1013904223) & 0xffffffff*
+        seed = (seed * 1664525 + 1013904223) & 0xffffffff
