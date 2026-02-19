@@ -6,6 +6,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from qiskit import QuantumCircuit, transpile
 from qiskit_ibm_runtime import QiskitRuntimeService, Sampler
 
+# =========================
+# APP
+# =========================
+
 app = FastAPI()
 
 app.add_middleware(
@@ -23,20 +27,25 @@ INSTANCE = "crn:v1:bluemix:public:quantum-computing:us-east:a/ace2d7c4d936422892
 
 jobs = {}
 
-def get_service():
-    return QiskitRuntimeService(
-        channel="ibm_quantum_platform",
-        token=IBM_TOKEN,
-        instance=INSTANCE
-    )
+# =========================
+# IBM INIT (ONLY ONCE)
+# =========================
 
-def get_sampler():
-    service = get_service()
-    backends = service.backends(simulator=False, operational=True)
-    backend = min(backends, key=lambda b: b.status().pending_jobs)
-    sampler = Sampler(mode=backend)
-    return sampler, backend
+service = QiskitRuntimeService(
+    channel="ibm_quantum_platform",
+    token=IBM_TOKEN,
+    instance=INSTANCE
+)
 
+backends = service.backends(simulator=False, operational=True)
+backend = min(backends, key=lambda b: b.status().pending_jobs)
+sampler = Sampler(mode=backend)
+
+print("IBM backend selected:", backend.name)
+
+# =========================
+# TAROT DECK
+# =========================
 
 MAJOR_ARCANA = [
     "The Fool","The Magician","The High Priestess","The Empress",
@@ -105,11 +114,12 @@ def card_filename(card_name):
 
     return f"{suit_letter}{rank_map[rank]}.jpg"
 
+# =========================
+# CREATE DRAW JOB
+# =========================
 
 @app.post("/draw")
 async def create_draw(data: dict):
-
-    sampler, backend = get_sampler()
 
     qc = QuantumCircuit(8)
     qc.h(range(8))
@@ -121,12 +131,14 @@ async def create_draw(data: dict):
     job_id = str(uuid4())
 
     jobs[job_id] = {
-        "ibm_job_id": ibm_job.job_id(),
-        "backend": backend.name
+        "ibm_job_id": ibm_job.job_id()
     }
 
     return {"job_id": job_id}
 
+# =========================
+# RESULT POLLING
+# =========================
 
 @app.get("/result/{job_id}")
 async def get_result(job_id: str):
@@ -134,18 +146,14 @@ async def get_result(job_id: str):
     if job_id not in jobs:
         return {"status": "error", "message": "Invalid job_id"}
 
-    job_data = jobs[job_id]
-
-    service = get_service()
-    ibm_job = service.job(job_data["ibm_job_id"])
-
+    ibm_job = service.job(jobs[job_id]["ibm_job_id"])
     status = ibm_job.status()
 
     if status.name in ["QUEUED","RUNNING"]:
         return {
             "status": "running",
             "ibm_status": status.name,
-            "backend": job_data["backend"]
+            "backend": backend.name
         }
 
     if status.name in ["ERROR","CANCELLED"]:
@@ -155,8 +163,7 @@ async def get_result(job_id: str):
         }
 
     result = ibm_job.result()
-    data = result[0].data
-    counts = data.meas.get_counts()
+    counts = result[0].data.meas.get_counts()
     bitstring = list(counts.keys())[0]
     seed = int(bitstring, 2)
 
@@ -178,9 +185,60 @@ async def get_result(job_id: str):
             }
             for c in selected
         ],
-        "backend": job_data["backend"]
+        "backend": backend.name
     }
 
+# =========================
+# INTERPRET
+# =========================
+
+@app.post("/interpret")
+async def interpret(data: dict):
+
+    question = data.get("question")
+    cards = data.get("cards")
+
+    if not OPENROUTER_KEY:
+        return {"interpretation": "Missing OPENROUTER_API_KEY"}
+
+    prompt = f"""
+Interpret this tarot spread in a psychologically grounded but symbolic way.
+Keep it under 250 words.
+
+Question:
+{question}
+
+Cards:
+{", ".join(cards)}
+"""
+
+    response = requests.post(
+        "https://openrouter.ai/api/v1/chat/completions",
+        headers={
+            "Authorization": f"Bearer {OPENROUTER_KEY}",
+            "Content-Type": "application/json"
+        },
+        json={
+            "model": "openai/gpt-4o-mini",
+            "messages": [
+                {"role": "user", "content": prompt}
+            ]
+        },
+        timeout=60
+    )
+
+    result = response.json()
+
+    if "choices" not in result:
+        return {"interpretation": str(result)}
+
+    return {
+        "interpretation": result["choices"][0]["message"]["content"]
+    }
+
+# =========================
+# ROOT
+# =========================
 
 @app.get("/")
 async def root():
