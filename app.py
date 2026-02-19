@@ -57,8 +57,55 @@ TAROT_DECK = MAJOR_ARCANA + MINOR_ARCANA
 
 
 def card_filename(card_name):
-    safe = card_name.replace(" ", "_")
-    return f"{safe}.jpg"
+
+    major_map = {
+        "The Fool": "m00.jpg",
+        "The Magician": "m01.jpg",
+        "The High Priestess": "m02.jpg",
+        "The Empress": "m03.jpg",
+        "The Emperor": "m04.jpg",
+        "The Hierophant": "m05.jpg",
+        "The Lovers": "m06.jpg",
+        "The Chariot": "m07.jpg",
+        "Strength": "m08.jpg",
+        "The Hermit": "m09.jpg",
+        "Wheel of Fortune": "m10.jpg",
+        "Justice": "m11.jpg",
+        "The Hanged Man": "m12.jpg",
+        "Death": "m13.jpg",
+        "Temperance": "m14.jpg",
+        "The Devil": "m15.jpg",
+        "The Tower": "m16.jpg",
+        "The Star": "m17.jpg",
+        "The Moon": "m18.jpg",
+        "The Sun": "m19.jpg",
+        "Judgement": "m20.jpg",
+        "The World": "m21.jpg"
+    }
+
+    if card_name in major_map:
+        return major_map[card_name]
+
+    rank, _, suit = card_name.partition(" of ")
+
+    suit_letter = {
+        "Wands": "w",
+        "Cups": "c",
+        "Swords": "s",
+        "Pentacles": "p"
+    }[suit]
+
+    rank_map = {
+        "Ace": "01",
+        "2": "02","3": "03","4": "04","5": "05",
+        "6": "06","7": "07","8": "08","9": "09",
+        "10": "10",
+        "Page": "11","Knight": "12",
+        "Queen": "13","King": "14"
+    }
+
+    return f"{suit_letter}{rank_map[rank]}.jpg"
+
 
 
 # ================= DRAW =================
@@ -149,8 +196,10 @@ async def interpret(data: dict):
         return {"interpretation": "Missing OPENROUTER_API_KEY"}
 
     prompt = f"""
-Interpret this tarot spread in a psychologically grounded but symbolic way.
-Keep it under 250 words.
+Respond in the same language as the question.
+
+Interpret this tarot spread in bold, verbally rich and interesting but symbolic way.
+Keep it under 400 words.
 
 Question:
 {question}
