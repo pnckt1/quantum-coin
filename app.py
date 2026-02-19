@@ -155,11 +155,18 @@ bitstring = list(counts.keys())[0]
 
     cards = shuffled[:3]
 
-    return {
-        "status": "done",
-        "cards": cards,
-        "backend": job_data["backend"]
-    }
+return {
+    "status": "done",
+    "cards": [
+        {
+            "name": c,
+            "image": c.replace(" ", "_") + ".jpg"
+        }
+        for c in cards
+    ],
+    "backend": job_data["backend"]
+}
+
 
 # =========================
 # INTERPRET
