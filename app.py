@@ -202,7 +202,7 @@ async def interpret(data: dict):
         return {"interpretation": "Missing OPENROUTER_API_KEY"}
 
     prompt = f"""
-Respond in czech or english language, depending on the language of the question.
+Respond in czech language.
 
 Interpret this tarot spread in a psychologically grounded but symbolic way.
 Keep it under 400 words.
