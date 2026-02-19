@@ -107,18 +107,19 @@ def card_filename(card_name):
     return f"{suit_letter}{rank_map[rank]}.jpg"
 
 
-
 # ================= DRAW =================
 
 @app.post("/draw")
 async def create_draw(data: dict):
 
-    qc = QuantumCircuit(8)
-    qc.h(range(8))
+    qc = QuantumCircuit(7)
+    qc.h(range(7))
     qc.measure_all()
 
     transpiled_qc = transpile(qc, backend)
-    ibm_job = sampler.run([transpiled_qc], shots=1)
+
+    # jedna úloha, 12 náhodných čísel 0–127
+    ibm_job = sampler.run([transpiled_qc], shots=12)
 
     job_id = str(uuid4())
 
@@ -140,7 +141,6 @@ async def get_result(job_id: str):
     ibm_job = service.job(jobs[job_id]["ibm_job_id"])
     status = ibm_job.status()
 
-    # Qiskit někdy vrací string
     status_name = status if isinstance(status, str) else status.name
 
     if status_name in ["QUEUED", "RUNNING"]:
@@ -159,17 +159,23 @@ async def get_result(job_id: str):
     result = ibm_job.result()
     counts = result[0].data.meas.get_counts()
 
-    bitstring = list(counts.keys())[0]
-    seed = int(bitstring, 2)
+    random_numbers = []
 
-    shuffled = TAROT_DECK.copy()
+    for bitstring, count in counts.items():
+        for _ in range(count):
+            random_numbers.append(int(bitstring, 2))
 
-    for i in range(len(shuffled) - 1, 0, -1):
-        seed = (seed * 1664525 + 1013904223) & 0xffffffff
-        j = seed % (i + 1)
-        shuffled[i], shuffled[j] = shuffled[j], shuffled[i]
+    deck = TAROT_DECK.copy()
+    selected = []
 
-    selected = shuffled[:3]
+    for r in random_numbers:
+        if len(selected) == 3:
+            break
+        if r < len(deck):
+            selected.append(deck.pop(r))
+
+    if len(selected) < 3:
+        raise Exception("Not enough valid quantum numbers")
 
     return {
         "status": "done",
