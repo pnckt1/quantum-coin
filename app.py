@@ -6,10 +6,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from qiskit import QuantumCircuit, transpile
 from qiskit_ibm_runtime import QiskitRuntimeService, Sampler
 
-# =========================
-# APP
-# =========================
-
 app = FastAPI()
 
 app.add_middleware(
@@ -27,10 +23,7 @@ INSTANCE = "crn:v1:bluemix:public:quantum-computing:us-east:a/ace2d7c4d936422892
 
 jobs = {}
 
-# =========================
-# IBM INIT
-# =========================
-
+# IBM init
 service = QiskitRuntimeService(
     channel="ibm_quantum_platform",
     token=IBM_TOKEN,
@@ -43,10 +36,7 @@ sampler = Sampler(mode=backend)
 
 print("IBM backend selected:", backend.name)
 
-# =========================
-# TAROT DECK
-# =========================
-
+# Tarot deck
 MAJOR_ARCANA = [
     "The Fool","The Magician","The High Priestess","The Empress",
     "The Emperor","The Hierophant","The Lovers","The Chariot",
@@ -63,36 +53,15 @@ RANKS = ["Ace","2","3","4","5","6","7","8","9","10",
 MINOR_ARCANA = [f"{r} of {s}" for s in SUITS for r in RANKS]
 TAROT_DECK = MAJOR_ARCANA + MINOR_ARCANA
 
-# =========================
-# CARD IMAGE MAPPING
-# =========================
-
 def card_filename(card_name):
-
-    major_map = {
-        "The Fool": "m00.jpg",
-        "The Magician": "m01.jpg",
-        "The High Priestess": "m02.jpg",
-        "The Empress": "m03.jpg",
-        "The Emperor": "m04.jpg",
-        "The Hierophant": "m05.jpg",
-        "The Lovers": "m06.jpg",
-        "The Chariot": "m07.jpg",
-        "Strength": "m08.jpg",
-        "The Hermit": "m09.jpg",
-        "Wheel of Fortune": "m10.jpg",
-        "Justice": "m11.jpg",
-        "The Hanged Man": "m12.jpg",
-        "Death": "m13.jpg",
-        "Temperance": "m14.jpg",
-        "The Devil": "m15.jpg",
-        "The Tower": "m16.jpg",
-        "The Star": "m17.jpg",
-        "The Moon": "m18.jpg",
-        "The Sun": "m19.jpg",
-        "Judgement": "m20.jpg",
-        "The World": "m21.jpg"
-    }
+    major_map = {f"The {name}": f"m{str(i).zfill(2)}.jpg"
+                 for i, name in enumerate([
+                     "Fool","Magician","High Priestess","Empress","Emperor",
+                     "Hierophant","Lovers","Chariot","Strength","Hermit",
+                     "Wheel of Fortune","Justice","Hanged Man","Death",
+                     "Temperance","Devil","Tower","Star","Moon","Sun",
+                     "Judgement","World"
+                 ])}
 
     if card_name in major_map:
         return major_map[card_name]
@@ -107,23 +76,16 @@ def card_filename(card_name):
     }[suit]
 
     rank_map = {
-        "Ace": "01",
-        "2": "02","3": "03","4": "04","5": "05",
-        "6": "06","7": "07","8": "08","9": "09",
-        "10": "10",
-        "Page": "11","Knight": "12",
-        "Queen": "13","King": "14"
+        "Ace": "01","2": "02","3": "03","4": "04","5": "05",
+        "6": "06","7": "07","8": "08","9": "09","10": "10",
+        "Page": "11","Knight": "12","Queen": "13","King": "14"
     }
 
     return f"{suit_letter}{rank_map[rank]}.jpg"
 
-# =========================
-# CREATE DRAW JOB
-# =========================
 
 @app.post("/draw")
 async def create_draw(data: dict):
-
     qc = QuantumCircuit(8)
     qc.h(range(8))
     qc.measure_all()
@@ -132,16 +94,10 @@ async def create_draw(data: dict):
     ibm_job = sampler.run([transpiled_qc], shots=1)
 
     job_id = str(uuid4())
-
-    jobs[job_id] = {
-        "ibm_job_id": ibm_job.job_id()
-    }
+    jobs[job_id] = {"ibm_job_id": ibm_job.job_id()}
 
     return {"job_id": job_id}
 
-# =========================
-# RESULT
-# =========================
 
 @app.get("/result/{job_id}")
 async def get_result(job_id: str):
@@ -152,17 +108,19 @@ async def get_result(job_id: str):
     ibm_job = service.job(jobs[job_id]["ibm_job_id"])
     status = ibm_job.status()
 
-    if status.name in ["QUEUED","RUNNING"]:
+    status_name = str(status)
+
+    if status_name in ["QUEUED", "RUNNING"]:
         return {
             "status": "running",
-            "ibm_status": status.name,
+            "ibm_status": status_name,
             "backend": backend.name
         }
 
-    if status.name in ["ERROR","CANCELLED"]:
+    if status_name in ["ERROR", "CANCELLED"]:
         return {
             "status": "error",
-            "ibm_status": status.name
+            "ibm_status": status_name
         }
 
     result = ibm_job.result()
@@ -174,3 +132,69 @@ async def get_result(job_id: str):
 
     for i in range(len(shuffled) - 1, 0, -1):
         seed = (seed * 1664525 + 1013904223) & 0xffffffff
+        j = seed % (i + 1)
+        shuffled[i], shuffled[j] = shuffled[j], shuffled[i]
+
+    selected = shuffled[:3]
+
+    return {
+        "status": "done",
+        "cards": [
+            {
+                "name": c,
+                "image": card_filename(c)
+            }
+            for c in selected
+        ],
+        "backend": backend.name
+    }
+
+
+@app.post("/interpret")
+async def interpret(data: dict):
+
+    question = data.get("question")
+    cards = data.get("cards")
+
+    if not OPENROUTER_KEY:
+        return {"interpretation": "Missing OPENROUTER_API_KEY"}
+
+    prompt = f"""
+Answer in the same language as the question.
+Maximum 400 words.
+
+Question:
+{question}
+
+Cards:
+{", ".join(cards)}
+"""
+
+    response = requests.post(
+        "https://openrouter.ai/api/v1/chat/completions",
+        headers={
+            "Authorization": f"Bearer {OPENROUTER_KEY}",
+            "Content-Type": "application/json"
+        },
+        json={
+            "model": "openai/gpt-4o-mini",
+            "messages": [
+                {"role": "user", "content": prompt}
+            ]
+        },
+        timeout=60
+    )
+
+    result = response.json()
+
+    if "choices" not in result:
+        return {"interpretation": str(result)}
+
+    return {
+        "interpretation": result["choices"][0]["message"]["content"]
+    }
+
+
+@app.get("/")
+async def root():
+    return {"message": "Quantum Tarot Backend FINAL"}
