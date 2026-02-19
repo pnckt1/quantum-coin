@@ -149,14 +149,16 @@ async def get_result(job_id: str):
     ibm_job = service.job(jobs[job_id]["ibm_job_id"])
     status = ibm_job.status()
 
-    if status.name in ["QUEUED","RUNNING"]:
+if status in ["QUEUED", "RUNNING"]:
+
         return {
             "status": "running",
             "ibm_status": status.name,
             "backend": backend.name
         }
 
-    if status.name in ["ERROR","CANCELLED"]:
+    if status in ["ERROR", "CANCELLED"]:
+
         return {
             "status": "error",
             "ibm_status": status.name
