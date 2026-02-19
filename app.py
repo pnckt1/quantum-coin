@@ -207,7 +207,7 @@ async def interpret(data: dict):
     prompt = f"""
 Respond in the same language as the question.
 
-Interpret this tarot spread in a psychologically detailed and interesting but symbolic way.
+Interpret this tarot spread in bold but symbolic way.
 Keep it under 400 words.
 
 Question:
