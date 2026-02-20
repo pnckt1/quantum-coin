@@ -202,10 +202,10 @@ async def interpret(data: dict):
         return {"interpretation": "Missing OPENROUTER_API_KEY"}
 
     prompt = f"""
-Respond in czech language.
+používej češtinu
 
-Interpret this tarot spread in a psychologically grounded but symbolic way.
-Keep it under 400 words.
+interpretuj výklad jako prostořeká cigánská kartářka, buď odvážnější a přímočařejší u otázek typu ano/ne.
+celkem do 400 slov.
 
 Question:
 {question}
